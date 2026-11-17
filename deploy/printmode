@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# printmode - switch the Pi between two modes (the printer can only be used by one at a time)
+#   printmode cups [name]  print server: CUPS + HTTP API (default)
+#   printmode usb [busid]  USB/IP: the printer shows up on your computer as if plugged in directly
+#   printmode              show status
+[ "$(id -u)" -eq 0 ] || exec sudo "$0" "$@"
+
+USBIP_PORT=3240
+
+find_busid() {
+  # Usage: find_busid -> prints first bus id (e.g. 1-1.2) of a DNP printer
+  local line vid pid
+  line="$(lsusb 2>/dev/null | grep -iE 'dnp|dai nippon|1343:' | head -1)"
+  [ -n "$line" ] || return 1
+  vid="$(echo "$line" | awk '{print $6}' | cut -d: -f1)"
+  pid="$(echo "$line" | awk '{print $6}' | cut -d: -f2)"
+  usbip list -l 2>/dev/null | awk -v id="${vid}:${pid}" '
+    /busid/ {bus=$3} $0 ~ id {print bus; exit}'
+}
+
+case "${1:-status}" in
+  cups)
+    systemctl stop usbipd 2>/dev/null
+    for b in $(usbip list -l 2>/dev/null | awk '/busid/{print $3}'); do usbip unbind -b "$b" 2>/dev/null; done
+    systemctl disable usbipd >/dev/null 2>&1
+    systemctl enable --now cups rx1print >/dev/null 2>&1
+    systemctl restart cups
+    echo "Mode: CUPS print server (IPP :631, API :8080)"
+    ;;
+  usb)
+    command -v usbip >/dev/null || { echo "usbip tools missing: apt install usbip"; exit 1; }
+    modprobe usbip-core && modprobe usbip-host || {
+      echo "ERROR: kernel has no usbip-host module. Use a kernel with CONFIG_USBIP_HOST (see README)."; exit 1; }
+    systemctl stop rx1print cups cups.socket 2>/dev/null
+    systemctl enable --now usbipd >/dev/null 2>&1 || systemctl start usbipd
+    BUS="${2:-${RX1_BUSID:-$(find_busid)}}"
+    [ -n "$BUS" ] || { echo "RX1 not found. Run 'usbip list -l' and use: printmode usb <busid>"; exit 1; }
+    usbip bind -b "$BUS" && echo "Mode: USB/IP, bound $BUS on port $USBIP_PORT"
+    echo "On your computer: usbip attach -r $(hostname -I | awk '{print $1}') -b $BUS"
+    ;;
+  *)
+    for s in cups rx1print usbipd; do printf '%-9s %s\n' "$s" "$(systemctl is-active $s 2>/dev/null)"; done
+    echo "--- USB/IP exportable devices"; usbip list -l 2>/dev/null | grep -E 'busid|DNP|1343' || true
+    ;;
+esac

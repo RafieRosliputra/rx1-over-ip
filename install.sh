@@ -12,6 +12,8 @@ export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y cups cups-filters printer-driver-gutenprint \
   avahi-daemon libnss-mdns python3 python3-pil usbutils
+apt-get install -y usbip || apt-get install -y linux-tools-generic || \
+  echo "WARNING: could not install usbip tools; USB/IP mode unavailable"
 
 echo "==> 2/5 CUPS: share queues on the LAN"
 usermod -aG lpadmin "${SUDO_USER:-root}" || true
@@ -39,8 +41,29 @@ install -d /opt/rx1print
 install -m 0644 "$HERE/rx1print/server.py" /opt/rx1print/server.py
 [ -f /etc/default/rx1print ] || install -m 0640 "$HERE/deploy/rx1print.env" /etc/default/rx1print
 install -m 0644 "$HERE/deploy/rx1print.service" /etc/systemd/system/rx1print.service
+install -m 0755 "$HERE/deploy/printmode" /usr/local/bin/printmode
+USBIPD="$(command -v usbipd || echo /usr/sbin/usbipd)"
+cat >/etc/systemd/system/usbipd.service <<EOF2
+[Unit]
+Description=USB/IP daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=${USBIPD}
+Restart=on-failure
+
+[Install]
+WantedBy=multi-user.target
+EOF2
 systemctl daemon-reload
+systemctl disable usbipd >/dev/null 2>&1 || true
 systemctl enable --now rx1print
+if modprobe usbip-host 2>/dev/null; then
+  echo "usbip-host" >/etc/modules-load.d/usbip.conf; echo "USB/IP kernel module: OK"
+else
+  echo "WARNING: this kernel has no usbip-host module -> 'printmode usb' won't work (print server still works)"
+fi
 
 echo "==> 5/5 Done"
 IP="$(hostname -I | awk '{print $1}')"
@@ -49,5 +72,6 @@ cat <<EOF
 Pi:   ${IP}  (${HOSTNAME}.local)
 CUPS: ipp://${IP}:631/printers/${PRINTER_NAME}
 API:  http://${IP}:8080/health
+Modes: printmode cups | printmode usb | printmode   (one at a time)
 Edit /etc/default/rx1print to set a token / media, then: systemctl restart rx1print
 EOF

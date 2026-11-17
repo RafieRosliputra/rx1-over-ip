@@ -1,28 +1,29 @@
-# rx1-wireless-print
+# rx1-over-ip
 
-Make a **DNP DS-RX1HS** dye-sub printer print over the network using a cheap
-Linux board (tested target: Orange Pi Zero 2, also fine on Raspberry Pi).
+Make a **DNP DS-RX1HS** dye-sub printer usable over the network with a cheap
+Linux board (target: Orange Pi Zero 2; also fine on Raspberry Pi).
 
-100% open source stack: **CUPS + Gutenprint** + a tiny HTTP API (`rx1print`).
+100% open source, no licences, no device limits. Two modes (one at a time):
+
+| Mode | What it is | Best for |
+|------|-----------|----------|
+| `printmode cups` | **Print server**: CUPS + Gutenprint + HTTP API | Any device, QR booth / website, hot folder |
+| `printmode usb`  | **USB extension**: USB/IP, the printer appears on your computer as if plugged in | Using the official DNP driver on your own computer |
 
 ```
-Mac / Windows / phone ──IPP──┐
-Website / photobooth ──HTTP──┤──> Orange Pi ──USB──> DNP RX1HS
-Mac hot folder ──────HTTP────┘     (CUPS + rx1print)
+cups:  Mac/Windows/phone --IPP--> Pi --USB--> RX1HS     Website --HTTP--> Pi
+usb :  Mac/Windows/Linux <--USB/IP over network--> Pi --USB--> RX1HS
 ```
 
 ## Install (on the board)
 
 1. Flash Armbian/Debian, connect WiFi (`sudo nmtui`).
 2. Plug in the RX1HS and switch it on.
-3. `git clone <this repo> && cd rx1-wireless-print && sudo bash install.sh`
+3. `git clone <this repo> && cd rx1-over-ip && sudo bash install.sh`
 
-## Use
+## Mode 1: print server (default)
 
-**As a network printer (IPP)** – add `ipp://<pi-ip>:631/printers/DNP-RX1HS`
-in macOS / Windows / Android printer settings.
-
-**From code (HTTP API)** – send the raw image bytes:
+Add `ipp://<pi-ip>:631/printers/DNP-RX1HS` in macOS / Windows / Android printer settings, or use the API:
 
 ```bash
 curl -H "Authorization: Bearer $TOKEN" --data-binary @photo.jpg \
@@ -34,21 +35,29 @@ curl -H "Authorization: Bearer $TOKEN" --data-binary @photo.jpg \
 | `4x6`   | photo fills one 4x6" print (auto-rotated, cropped)   |
 | `strip` | two identical 2x6" strips on one 4x6" print (cut it) |
 
-`GET /health` returns the CUPS printer status.
+`GET /health` = printer status. macOS hot folder: `./mac/hotfolder.sh ~/Desktop/hotfolder orangepi.local 4x6`.
+Config: `/etc/default/rx1print` (`RX1_TOKEN` recommended, `RX1_MEDIA`, ...).
 
-**macOS hot folder** – `./mac/hotfolder.sh ~/Desktop/hotfolder orangepi.local 4x6`
+## Mode 2: USB extension (USB/IP)
 
-## Config
+On the Pi: `sudo printmode usb` (auto-finds the RX1; or `printmode usb <busid>` from `usbip list -l`).
 
-`/etc/default/rx1print` – printer name, port, `RX1_TOKEN` (recommended),
-`RX1_MEDIA`, max copies. Restart with `sudo systemctl restart rx1print`.
+On your computer, attach it (port 3240):
+
+- **Linux**: `sudo usbip attach -r <pi-ip> -b <busid>` (kernel `vhci-hcd`)
+- **Windows**: a USB/IP client such as [usbip-win2](https://github.com/vadimgrn/usbip-win2) (not tested here)
+- **macOS**: no built-in client. The experimental [sing-usbip](https://pkg.go.dev/github.com/sagernet/sing-usbip) project lists a macOS client; not tested here
+
+Then install DNP's official driver on that computer and print normally.
+Back to print server: `sudo printmode cups`.
+
+Requirements: the Pi kernel needs `usbip-host` (`CONFIG_USBIP_HOST`). `install.sh` warns if it is missing; a few board kernels lack it.
 
 ## Notes
 
-- Gutenprint colours differ slightly from DNP's official driver.
-- If the printer/driver isn't auto-detected, run `lpinfo -v` and `lpinfo -m | grep -i rx1`
-  and add it at `http://<pi>:631`.
-- Use LAN instead of WiFi for events if you can.
+- Gutenprint colours differ slightly from DNP's official driver (mode 1).
+- If the printer isn't auto-detected, check `lpinfo -v` and `lpinfo -m | grep -i rx1`, add it at `http://<pi>:631`.
+- Prefer LAN over WiFi at events. USB/IP is sensitive to latency.
 - Put the API behind a token before exposing it beyond your LAN.
 
 ## License
