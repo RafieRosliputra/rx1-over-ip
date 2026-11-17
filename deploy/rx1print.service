@@ -1,0 +1,16 @@
+[Unit]
+Description=rx1print - HTTP print API for DNP RX1HS
+After=network-online.target cups.service
+Wants=network-online.target
+
+[Service]
+EnvironmentFile=-/etc/default/rx1print
+ExecStart=/usr/bin/python3 /opt/rx1print/server.py
+Restart=on-failure
+DynamicUser=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+
+[Install]
+WantedBy=multi-user.target
